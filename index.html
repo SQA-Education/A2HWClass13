@@ -120,7 +120,6 @@ textarea{min-height:130px;resize:vertical} input[type="text"]:focus,textarea:foc
 <button class="btn btn-orange" style="margin-top:20px" onclick="submitToTeacher()">Finish &rarr;</button>
 <div id="finishSuccess" style="display:none;margin-top:16px;background:#f0fdf4;border:2px solid #22c55e;border-radius:12px;padding:16px;color:#15803d;font-weight:600;font-size:1.1em">&check; Done! Your homework has been sent to your teacher.</div>
 </div>
-<div style="text-align:center;margin-top:16px"><button class="btn" style="background:#fff;color:#5B5091" onclick="location.reload()">Try Again</button></div>
 </div>
 </div>
 
@@ -182,6 +181,7 @@ function startQuiz(){
   const cls=document.getElementById('className').value;
   if(!name){alert('Please enter your name');return;}
   if(!cls){alert('Please select your class');return;}
+  setTeacher(document.getElementById('className'));
   initQuestions();showSection('s1');
 }
 
@@ -273,13 +273,11 @@ function startSpeechRecognition(){
     box.classList.remove('hidden');
     return;
   }
-  // Reset transcript at the start of a new recording session
   spokenText='';
   speechRec=new SR();
   speechRec.continuous=true;speechRec.interimResults=true;speechRec.lang='en-US';
   speechRec.onresult=function(event){
     let interim='';
-    // Walk results from where we left off; APPEND finals to spokenText
     for(let i=event.resultIndex;i<event.results.length;i++){
       if(event.results[i].isFinal){
         spokenText+=event.results[i][0].transcript+' ';
@@ -299,9 +297,6 @@ function startSpeechRecognition(){
     }
   };
   speechRec.onend=function(){
-    // Chrome auto-stops every ~60s during continuous recognition.
-    // We must restart while still recording so the transcript keeps accumulating.
-    // spokenText is preserved across restarts because we APPEND in onresult.
     if(isRec){try{speechRec.start();}catch(e){}}
   };
   try{speechRec.start();}catch(e){}
@@ -316,12 +311,10 @@ function stopSpeechRecognition(){
 
 async function toggleRec(){
   if(!isRec){
-    // Set isRec=true BEFORE starting SR so the onend auto-restart logic works correctly
     isRec=true;recTime=0;
     document.getElementById('recBtn').classList.add('recording');
     document.getElementById('recStatus').textContent='Recording... Click again to stop';
     recTimer=setInterval(()=>{recTime++;document.getElementById('timer').textContent=Math.floor(recTime/60)+':'+String(recTime%60).padStart(2,'0');},1000);
-    // Start SpeechRecognition only (no MediaRecorder) - mic conflicts cause speaking to fail on iOS/some Android
     startSpeechRecognition();
   }else{
     isRec=false;
@@ -333,8 +326,6 @@ async function toggleRec(){
 }
 
 function isRealSpeech(t){
-  // Accept any genuine speech of 3+ words. Keyword matching is what determines SCORE,
-  // not whether speech happened at all.
   const w=t.trim().split(/\s+/).filter(Boolean);
   return w.length>=3;
 }
@@ -379,7 +370,9 @@ function submitFinal(){
   showSection('results');
 }
 
+let submitted=false;
 function directSubmit(classLabel){
+  if(submitted)return;submitted=true;
   const pct=Math.round((scores.l+scores.v+scores.w+scores.s+scores.g)/57*100);
   const speakingTranscript=spokenText||'';
   const FORM_URL='https://docs.google.com/forms/d/e/1FAIpQLScxGsRNBL0knEUNZNnTX3FLDx22Lxgc-J7uM4yvi-yuK-hHAQ/formResponse';
@@ -396,7 +389,8 @@ function directSubmit(classLabel){
   function buildFormData(){
     const fd=new FormData();
     fd.append('entry.1066076854',name);
-    fd.append('entry.351193357',classLabel);
+    // entry.351193357 = Session, entry.514421492 = Class (matches A2 Class 10 mapping)
+    fd.append('entry.351193357',SESSION);
     fd.append('entry.2003686479',scores.l+'/3');
     fd.append('entry.985159923',scores.v+'/6');
     fd.append('entry.2097271288',scores.w+'/20');
@@ -405,7 +399,7 @@ function directSubmit(classLabel){
     fd.append('entry.1853593873',pct+'%');
     fd.append('entry.388860548',writingText);
     fd.append('entry.880068307',speakingTranscript);
-    fd.append('entry.514421492','A2');
+    fd.append('entry.514421492',classLabel);
     fd.append('entry.1451249480',document.getElementById('teacherName').value);
     return fd;
   }
@@ -429,6 +423,7 @@ function directSubmit(classLabel){
         if(attempt<maxAttempts){
           setTimeout(trySubmit,1500);
         }else{
+          submitted=false;
           statusBox.style.background='#fef2f2';
           statusBox.style.borderColor='#ef4444';
           statusBox.style.color='#991b1b';
