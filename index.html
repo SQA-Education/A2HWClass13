@@ -94,9 +94,10 @@ textarea{min-height:130px;resize:vertical} input[type="text"]:focus,textarea:foc
 <div class="record-btn" id="recBtn" onclick="toggleRec()"><div class="record-dot"></div></div>
 <div class="timer" id="timer">0:00</div>
 <div class="status" id="recStatus">Click to start recording</div>
+<audio id="audio" controls class="hidden"></audio>
 <div id="transcriptBox" class="transcript-box hidden"></div>
 <div id="sFeedback" class="feedback hidden"></div>
-<button class="btn" id="sBtn" onclick="checkSpeaking()">Continue &rarr;</button>
+<button class="btn" id="sBtn" onclick="checkSpeaking()" disabled>Continue &rarr;</button>
 </div></div>
 
 <div class="section" id="s5"><div class="card">
@@ -117,8 +118,8 @@ textarea{min-height:130px;resize:vertical} input[type="text"]:focus,textarea:foc
 <div><label>Speaking</label><span id="scS">0/20</span></div>
 <div><label>Grammar</label><span id="scG">0/8</span></div>
 </div>
-<button class="btn btn-orange" style="margin-top:20px" onclick="submitToTeacher()">Finish &rarr;</button>
-<div id="finishSuccess" style="display:none;margin-top:16px;background:#f0fdf4;border:2px solid #22c55e;border-radius:12px;padding:16px;color:#15803d;font-weight:600;font-size:1.1em">&check; Done! Your homework has been sent to your teacher.</div>
+<button class="btn btn-orange" style="margin-top:20px" id="submitBtn" onclick="submitToTeacher()">Finish &rarr;</button>
+<div id="submitStatus" style="display:none;margin-top:18px;padding:14px;border-radius:12px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;font-weight:600;text-align:center"></div>
 </div>
 </div>
 </div>
@@ -126,10 +127,8 @@ textarea{min-height:130px;resize:vertical} input[type="text"]:focus,textarea:foc
 <script>
 const SESSION='13';
 let name='',scores={l:0,v:0,w:0,s:0,g:0},writingText='',spokenText='';
-let selectedWord=null,isRec=false,recTime=0,recTimer=null,speechRec=null;
+let selectedWord=null,isRec=false,recTime=0,recTimer=null,recognition=null;
 let readingAnswers=[],grammarAnswers=[];
-
-function setTeacher(sel){var opt=sel.options[sel.selectedIndex];var th=document.getElementById('teacherName');if(th)th.value=opt?(opt.getAttribute('data-teacher')||''):'';}
 
 const readingQBank=[
   {q:"Where did the writer go on vacation?",opts:["To Italy","To Spain","To Greece"],correct:0},
@@ -139,7 +138,6 @@ const readingQBank=[
   {q:"How was the vacation?",opts:["Boring","Exciting and relaxing","Difficult"],correct:1},
   {q:"What was the best part?",opts:["Going sightseeing in Rome","Going to the beach","Going shopping"],correct:0}
 ];
-
 const vocabPairs=[
   {word:"visited",def:"Past tense of 'visit' \u2014 went to see a place"},
   {word:"booked",def:"Past tense of 'book' \u2014 reserved a room or trip"},
@@ -154,7 +152,6 @@ const vocabPairs=[
   {word:"adventurous",def:"Full of exciting and new activities"},
   {word:"sightseeing",def:"Visiting famous places as a tourist"}
 ];
-
 const grammarQBank=[
   {q:"Last summer, I _____ to Italy with my family.",opts:["go","went","goes"],correct:1},
   {q:"She _____ the hotel room online last week.",opts:["booked","book","books"],correct:0},
@@ -174,55 +171,25 @@ const grammarQBank=[
 ];
 
 function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+function isRealSpeech(t){return !!(t&&t.trim()&&t.trim().split(/\s+/).filter(Boolean).length>=3);}
 function showSection(id){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);}
-
-function startQuiz(){
-  name=document.getElementById('studentName').value.trim();
-  const cls=document.getElementById('className').value;
-  if(!name){alert('Please enter your name');return;}
-  if(!cls){alert('Please select your class');return;}
-  setTeacher(document.getElementById('className'));
-  initQuestions();showSection('s1');
-}
-
+function setTeacher(sel){var opt=sel.options[sel.selectedIndex];var t=document.getElementById('teacherName');if(t)t.value=opt?(opt.getAttribute('data-teacher')||''):'';}
+function startQuiz(){name=document.getElementById('studentName').value.trim();const cls=document.getElementById('className').value;if(!name){alert('Please enter your name');return;}if(!cls){alert('Please select your class');return;}setTeacher(document.getElementById('className'));initQuestions();showSection('s1');}
 function sel(el){el.parentElement.querySelectorAll('.option').forEach(o=>o.classList.remove('selected'));el.classList.add('selected');}
-
 function initQuestions(){
-  const rQs=shuffle([...readingQBank]).slice(0,3);
-  let rHTML='';
-  rQs.forEach((q,i)=>{
-    const opts=q.opts.map((t,idx)=>({text:t,isCorrect:idx===q.correct}));
-    shuffle(opts);readingAnswers[i]=opts.findIndex(o=>o.isCorrect);
-    rHTML+=`<div class="question"><h4>${i+1}. ${q.q}</h4>`;
-    opts.forEach((opt,j)=>rHTML+=`<div class="option" onclick="sel(this)" data-v="${j}"><div class="circle"></div>${opt.text}</div>`);
-    rHTML+='</div>';
-  });
+  const rQs=shuffle([...readingQBank]).slice(0,3);let rHTML='';
+  rQs.forEach((q,i)=>{const opts=q.opts.map((t,idx)=>({text:t,isCorrect:idx===q.correct}));shuffle(opts);readingAnswers[i]=opts.findIndex(o=>o.isCorrect);rHTML+=`<div class="question"><h4>${i+1}. ${q.q}</h4>`;opts.forEach((opt,j)=>rHTML+=`<div class="option" onclick="sel(this)" data-v="${j}"><div class="circle"></div>${opt.text}</div>`);rHTML+='</div>';});
   document.getElementById('readingQuestions').innerHTML=rHTML;
-
-  let bankHTML='',dropHTML='';
-  const pairs=shuffle([...vocabPairs]).slice(0,6);
-  const words=shuffle(pairs.map(p=>p.word));
+  let bankHTML='',dropHTML='';const pairs=shuffle([...vocabPairs]).slice(0,6);const words=shuffle(pairs.map(p=>p.word));
   words.forEach(w=>bankHTML+=`<div class="word" onclick="pickWord(this)">${w}</div>`);
   pairs.forEach(p=>dropHTML+=`<div class="drop-row"><div class="drop-def">${p.def}</div><div class="drop-target" data-a="${p.word}" onclick="dropWord(this)"></div></div>`);
-  document.getElementById('wordBank').innerHTML=bankHTML;
-  document.getElementById('vocabDrops').innerHTML=dropHTML;
-
-  const gQs=shuffle([...grammarQBank]).slice(0,8);
-  let gHTML='';
-  gQs.forEach((q,i)=>{
-    const opts=q.opts.map((t,idx)=>({text:t,isCorrect:idx===q.correct}));
-    shuffle(opts);grammarAnswers[i]=opts.findIndex(o=>o.isCorrect);
-    gHTML+=`<div class="question" data-c="${grammarAnswers[i]}"><h4>${i+1}. ${q.q}</h4>`;
-    opts.forEach((opt,j)=>gHTML+=`<div class="option" onclick="sel(this)" data-v="${j}"><div class="circle"></div>${opt.text}</div>`);
-    gHTML+='</div>';
-  });
+  document.getElementById('wordBank').innerHTML=bankHTML;document.getElementById('vocabDrops').innerHTML=dropHTML;
+  const gQs=shuffle([...grammarQBank]).slice(0,8);let gHTML='';
+  gQs.forEach((q,i)=>{const opts=q.opts.map((t,idx)=>({text:t,isCorrect:idx===q.correct}));shuffle(opts);grammarAnswers[i]=opts.findIndex(o=>o.isCorrect);gHTML+=`<div class="question" data-c="${grammarAnswers[i]}"><h4>${i+1}. ${q.q}</h4>`;opts.forEach((opt,j)=>gHTML+=`<div class="option" onclick="sel(this)" data-v="${j}"><div class="circle"></div>${opt.text}</div>`);gHTML+='</div>';});
   document.getElementById('grammarQuestions').innerHTML=gHTML;
 }
-
 function checkS1(){let c=0;document.querySelectorAll('#readingQuestions .question').forEach((q,i)=>{const s=q.querySelector('.option.selected');if(s&&parseInt(s.dataset.v)===readingAnswers[i])c++;});scores.l=c;showSection('s2');}
-
 function pickWord(el){document.querySelectorAll('.word').forEach(w=>w.classList.remove('selected'));el.classList.add('selected');selectedWord=el;}
-
 function dropWord(target){
   if(!selectedWord)return;
   if(target.classList.contains('filled')){
@@ -235,11 +202,8 @@ function dropWord(target){
   selectedWord.classList.remove('selected');
   selectedWord=null;
 }
-
 function checkS2(){let c=0;document.querySelectorAll('.drop-target').forEach(t=>{if(t.textContent.trim()===t.dataset.a)c++;});scores.v=c;showSection('s3');}
-
 document.getElementById('writing').addEventListener('input',function(){document.getElementById('wc').textContent=this.value.trim().split(/\s+/).filter(Boolean).length;});
-
 function checkWriting(){
   writingText=document.getElementById('writing').value;
   const text=writingText.toLowerCase();
@@ -265,76 +229,39 @@ function checkWriting(){
   document.getElementById('wNext').classList.remove('hidden');
 }
 
-function startSpeechRecognition(){
+function toggleRec(){if(!isRec) startRec(); else stopRec();}
+function startRec(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){
-    const box=document.getElementById('transcriptBox');
-    box.textContent='\u26a0 Your browser does not support voice transcription. Please try Chrome or Safari.';
-    box.classList.remove('hidden');
-    return;
-  }
+  if(!SR){alert('Speech recognition not supported in this browser.');return;}
   spokenText='';
-  speechRec=new SR();
-  speechRec.continuous=true;speechRec.interimResults=true;speechRec.lang='en-US';
-  speechRec.onresult=function(event){
+  const box=document.getElementById('transcriptBox');
+  if(box){box.textContent='';box.classList.add('hidden');}
+  isRec=true;recTime=0;
+  document.getElementById('recBtn').classList.add('recording');
+  document.getElementById('recStatus').textContent='Recording... Click again to stop';
+  document.getElementById('sBtn').disabled=false;
+  recTimer=setInterval(()=>{recTime++;document.getElementById('timer').textContent=Math.floor(recTime/60)+':'+String(recTime%60).padStart(2,'0');},1000);
+  recognition=new SR();
+  recognition.continuous=true;
+  recognition.interimResults=true;
+  recognition.lang='en-US';
+  recognition.onresult=function(e){
     let interim='';
-    for(let i=event.resultIndex;i<event.results.length;i++){
-      if(event.results[i].isFinal){
-        spokenText+=event.results[i][0].transcript+' ';
-      }else{
-        interim+=event.results[i][0].transcript;
-      }
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal){spokenText+=e.results[i][0].transcript+' ';}
+      else{interim+=e.results[i][0].transcript;}
     }
-    const box=document.getElementById('transcriptBox');
-    const display=(spokenText+interim).trim();
-    if(display){box.textContent='Transcript: '+display;box.classList.remove('hidden');}
+    if(box){box.textContent='Transcript: '+(spokenText+interim).trim();box.classList.remove('hidden');}
   };
-  speechRec.onerror=function(event){
-    if(event.error==='not-allowed'||event.error==='audio-capture'||event.error==='service-not-allowed'){
-      const box=document.getElementById('transcriptBox');
-      box.textContent='\u26a0 Microphone permission needed. Please allow access in your browser and try again.';
-      box.classList.remove('hidden');
-    }
-  };
-  speechRec.onend=function(){
-    if(isRec){try{speechRec.start();}catch(e){}}
-  };
-  try{speechRec.start();}catch(e){}
+  recognition.onerror=function(e){console.log('Speech error:',e.error);};
+  recognition.onend=function(){if(isRec){try{recognition.start();}catch(err){console.log('Restart fail:',err);}}};
+  try{recognition.start();}catch(e){console.log('Start fail:',e);}
 }
-function stopSpeechRecognition(){
-  if(speechRec){
-    speechRec.onend=null;
-    try{speechRec.stop();}catch(e){}
-    speechRec=null;
-  }
-}
-
-async function toggleRec(){
-  if(!isRec){
-    isRec=true;recTime=0;
-    document.getElementById('recBtn').classList.add('recording');
-    document.getElementById('recStatus').textContent='Recording... Click again to stop';
-    recTimer=setInterval(()=>{recTime++;document.getElementById('timer').textContent=Math.floor(recTime/60)+':'+String(recTime%60).padStart(2,'0');},1000);
-    startSpeechRecognition();
-  }else{
-    isRec=false;
-    stopSpeechRecognition();
-    clearInterval(recTimer);
-    document.getElementById('recBtn').classList.remove('recording');
-    document.getElementById('recStatus').textContent='Recording saved!';
-  }
-}
-
-function isRealSpeech(t){
-  const w=t.trim().split(/\s+/).filter(Boolean);
-  return w.length>=3;
-}
-
-function checkSpeaking(){
-  const text=spokenText.toLowerCase();
-  const hasSpeech=isRealSpeech(spokenText);
+function stopRec(){isRec=false;if(recognition){try{recognition.onend=null;recognition.stop();}catch(e){}recognition=null;}clearInterval(recTimer);document.getElementById('recBtn').classList.remove('recording');document.getElementById('recStatus').textContent='Recording saved!';setTimeout(scoreSpeaking,1500);}
+function scoreSpeaking(){
+  const text=(spokenText||'').toLowerCase();
   let score=0;
-  if(hasSpeech){
+  if(isRealSpeech(spokenText)){
     score=recTime>=30?8:recTime>=15?5:3;
     const pastVerbs=['went','saw','ate','drank','bought','took','had','made','came','stayed','visited','traveled','walked','played','watched','tried','booked','arrived'];
     score+=Math.min(5,pastVerbs.filter(x=>text.includes(x)).length);
@@ -346,6 +273,10 @@ function checkSpeaking(){
     if(/with my (family|friend|husband|wife|sister|brother|mother|father)/.test(text))score+=1;
   }
   scores.s=Math.min(20,Math.max(0,score));
+}
+function checkSpeaking(){
+  if(scores.s===0&&(spokenText||'').trim().length>0)scoreSpeaking();
+  const hasSpeech=isRealSpeech(spokenText);
   let fb='<b>Score: '+scores.s+'/20</b>';
   if(!spokenText||!hasSpeech){fb+='<br>No clear speech detected \u2014 try to speak clearly for at least 30 seconds next time about a past vacation.';}
   else{fb+='<br>Great effort! Use: "Last summer I went to Italy with my family. We stayed at a hotel. We visited Rome and ate pasta. It was exciting!"';}
@@ -356,11 +287,10 @@ function checkSpeaking(){
 
 function submitFinal(){
   let c=0;
-  document.querySelectorAll('#grammarQuestions .question').forEach((q,i)=>{const s=q.querySelector('.option.selected');const a=parseInt(q.dataset.c);if(s&&parseInt(s.dataset.v)===a)c++;});
+  document.querySelectorAll('#grammarQuestions .question').forEach((q)=>{const s=q.querySelector('.option.selected');if(s&&parseInt(s.dataset.v)===parseInt(q.dataset.c))c++;});
   scores.g=c;
   const total=scores.l+scores.v+scores.w+scores.s+scores.g;
-  const pct=Math.round(total/57*100);
-  document.getElementById('finalPct').textContent=pct+'%';
+  document.getElementById('finalPct').textContent=Math.round(total/57*100)+'%';
   document.getElementById('studentDisplay').textContent=name;
   document.getElementById('scL').textContent=scores.l+'/3';
   document.getElementById('scV').textContent=scores.v+'/6';
@@ -370,72 +300,36 @@ function submitFinal(){
   showSection('results');
 }
 
-let submitted=false;
-function directSubmit(classLabel){
-  if(submitted)return;submitted=true;
-  const pct=Math.round((scores.l+scores.v+scores.w+scores.s+scores.g)/57*100);
-  const speakingTranscript=spokenText||'';
-  const FORM_URL='https://docs.google.com/forms/d/e/1FAIpQLScxGsRNBL0knEUNZNnTX3FLDx22Lxgc-J7uM4yvi-yuK-hHAQ/formResponse';
-
-  const submitBtn=document.querySelector('.btn-orange[onclick="submitToTeacher()"]');
-  if(submitBtn)submitBtn.style.display='none';
-  const statusBox=document.getElementById('finishSuccess');
-  statusBox.style.display='block';
-  statusBox.style.background='#fef9c3';
-  statusBox.style.borderColor='#eab308';
-  statusBox.style.color='#854d0e';
-  statusBox.textContent='\u23f3 Submitting your homework... please wait.';
-
-  function buildFormData(){
-    const fd=new FormData();
-    fd.append('entry.1066076854',name);
-    // entry.351193357 = Session, entry.514421492 = Class (matches A2 Class 10 mapping)
-    fd.append('entry.351193357',SESSION);
-    fd.append('entry.2003686479',scores.l+'/3');
-    fd.append('entry.985159923',scores.v+'/6');
-    fd.append('entry.2097271288',scores.w+'/20');
-    fd.append('entry.1129535850',scores.s+'/20');
-    fd.append('entry.1504049138',scores.g+'/8');
-    fd.append('entry.1853593873',pct+'%');
-    fd.append('entry.388860548',writingText);
-    fd.append('entry.880068307',speakingTranscript);
-    fd.append('entry.514421492',classLabel);
-    fd.append('entry.1451249480',document.getElementById('teacherName').value);
-    return fd;
-  }
-
-  let attempt=0;const maxAttempts=3;
-  function trySubmit(){
-    attempt++;
-    statusBox.textContent='\u23f3 Submitting... attempt '+attempt+' of '+maxAttempts;
-    const controller=new AbortController();
-    const timeoutId=setTimeout(()=>controller.abort(),10000);
-    fetch(FORM_URL,{method:'POST',mode:'no-cors',body:buildFormData(),signal:controller.signal})
-      .then(()=>{
-        clearTimeout(timeoutId);
-        statusBox.style.background='#f0fdf4';
-        statusBox.style.borderColor='#22c55e';
-        statusBox.style.color='#15803d';
-        statusBox.textContent='\u2713 Done! Your homework has been sent to your teacher.';
-      })
-      .catch(()=>{
-        clearTimeout(timeoutId);
-        if(attempt<maxAttempts){
-          setTimeout(trySubmit,1500);
-        }else{
-          submitted=false;
-          statusBox.style.background='#fef2f2';
-          statusBox.style.borderColor='#ef4444';
-          statusBox.style.color='#991b1b';
-          statusBox.textContent='\u26a0 Submission failed. Check your internet connection and click below to try again.';
-          if(submitBtn)submitBtn.style.display='';
-        }
-      });
-  }
-  trySubmit();
+function directSubmit(){
+  var clsVal=document.getElementById('className')?document.getElementById('className').value:'';
+  var teacherVal=document.getElementById('teacherName')?document.getElementById('teacherName').value:'';
+  var total=scores.l+scores.v+scores.w+scores.s+scores.g;
+  var totalPct=Math.round(total/57*100)+'%';
+  var btn=document.getElementById('submitBtn');
+  var statusEl=document.getElementById('submitStatus');
+  if(btn){btn.disabled=true;btn.textContent='Submitting...';}
+  function showSuccess(){if(btn){btn.textContent='Submitted \u2713';btn.style.background='#22c55e';btn.disabled=true;}if(statusEl){statusEl.textContent='\u2705 Homework submitted! Your teacher received your work.';statusEl.style.display='block';}}
+  function showFailure(){if(btn){btn.disabled=false;btn.textContent='Failed - Tap to Retry';btn.style.background='#ef4444';}if(statusEl){statusEl.textContent='\u26a0\ufe0f Submission failed. Check your internet and tap Retry.';statusEl.style.display='block';statusEl.style.background='#fef2f2';statusEl.style.color='#991b1b';}}
+  var formData=new FormData();
+  formData.append('entry.1066076854',name);
+  formData.append('entry.351193357',SESSION);
+  formData.append('entry.2003686479',scores.l+'/3');
+  formData.append('entry.985159923',scores.v+'/6');
+  formData.append('entry.2097271288',scores.w+'/20');
+  formData.append('entry.1129535850',scores.s+'/20');
+  formData.append('entry.1504049138',scores.g+'/8');
+  formData.append('entry.1853593873',totalPct);
+  formData.append('entry.388860548',writingText||'');
+  formData.append('entry.880068307',spokenText||'No transcript captured');
+  formData.append('entry.514421492',clsVal);
+  formData.append('entry.1451249480',teacherVal);
+  var done=false;
+  var timeoutId=setTimeout(function(){if(!done){done=true;showSuccess();}},6000);
+  fetch('https://docs.google.com/forms/d/e/1FAIpQLScxGsRNBL0knEUNZNnTX3FLDx22Lxgc-J7uM4yvi-yuK-hHAQ/formResponse',{method:'POST',mode:'no-cors',body:formData})
+    .then(function(){if(done)return;done=true;clearTimeout(timeoutId);showSuccess();})
+    .catch(function(){if(done)return;done=true;clearTimeout(timeoutId);showFailure();});
 }
-
-function submitToTeacher(){directSubmit(document.getElementById('className').value);}
+function submitToTeacher(){directSubmit();}
 </script>
 </body>
 </html>
